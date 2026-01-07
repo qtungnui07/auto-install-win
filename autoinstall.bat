@@ -61,7 +61,39 @@ goto :Error
     pause
     exit
 )
+:Option2
+setlocal EnableDelayedExpansion
+echo Cleaning and partitioning disk %disknum% for Windows and Data...
 
+set /p "winGB=Enter Windows partition size in GB (Integer only): "
+if "%winGB%"=="" goto :Error
+set /a winMB=winGB*1024
+
+(
+    echo select disk %disknum%
+    echo clean
+    echo convert gpt
+    echo create partition efi size=512
+    echo format quick fs=fat32 label="System"
+    echo assign letter="S"
+    echo create partition primary size=%winMB%
+    echo format quick fs=ntfs label="Windows"
+    echo assign letter="W"
+    echo create partition primary
+    echo format quick fs=ntfs label="Data"
+    echo assign letter="D"
+    echo exit
+) | diskpart
+
+echo Applying Windows image to disk %disknum%...
+dism /Apply-Image /ImageFile:%InstallFile% /Index:1 /ApplyDir:W:\
+    
+echo Configuring boot files...
+bcdboot W:\Windows /s S: /f UEFI
+
+echo Installation complete. You can now reboot into Windows.
+pause
+exit
 
 :Error
 echo Invalid input. Exiting...
