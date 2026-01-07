@@ -82,7 +82,7 @@ set /a winMB=winGB*1024
     echo assign letter="W"
     echo create partition primary
     echo format quick fs=ntfs label="Data"
-    echo assign letter="D"
+    echo assign letter="H"
     echo exit
 ) | diskpart
 
