@@ -65,43 +65,74 @@ goto :Error
 setlocal EnableDelayedExpansion
 echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
 
-REM --- FIX: Dùng PowerShell để lấy dung lượng MB vì CMD không tính được số Bytes quá lớn ---
-set "diskSizeMB="
-for /f "usebackq" %%A in (`powershell -command "[math]::Round((Get-Disk -Number %disknum%).Size / 1MB)"`) do set "diskSizeMB=%%A"
+:: --- BƯỚC 1: Lấy dung lượng ổ cứng từ Diskpart ---
+:: Logic: Chạy 'list disk', tìm dòng chứa Disk đang chọn, lấy cột dung lượng và đơn vị.
+:: Mặc định output: "Disk 0    Online          476 GB      0 B"
+:: Token 1=Disk, 2=Index, 3=Status(Online), 4=Size, 5=Unit(GB/MB)
 
-if "%diskSizeMB%"=="" (
-    echo Error: Could not determine disk size. PowerShell may be missing or disk is invalid.
-    pause
-    exit /b
+set "dSize="
+set "dUnit="
+set "totalMB=0"
+
+for /f "tokens=4,5" %%a in ('echo list disk ^| diskpart ^| find "Disk %disknum%"') do (
+    set "dSize=%%a"
+    set "dUnit=%%b"
 )
 
-REM --- Tính toán chia đôi ổ cứng: (Tổng MB - 512MB EFI) chia 2 ---
-REM Lưu ý: set /a chỉ hoạt động tốt nếu ổ cứng nhỏ hơn 2TB (2 triệu MB).
-set /a windowsSizeMB=(diskSizeMB-512)/2
-
-echo Disk Size: %diskSizeMB% MB
-echo Windows Partition Target: %windowsSizeMB% MB
-
-if %windowsSizeMB% lss 20480 (
-    echo Calculated Windows partition too small (%windowsSizeMB% MB). Exiting...
+:: Kiểm tra nếu không lấy được thông tin
+if "%dSize%"=="" (
+    echo Error: Could not detect disk size from Diskpart.
     pause
-    exit /b
+    goto :Error
 )
 
-REM
+:: --- BƯỚC 2: Quy đổi ra MB ---
+:: Lưu ý: CMD chỉ tính toán được số nguyên dưới 2TB (khoảng 2.000.000 MB).
+:: Nếu ổ cứng của bạn > 2TB, lệnh set /a sẽ bị lỗi.
+if /i "%dUnit%"=="GB" (
+    set /a totalMB=!dSize!*1024
+) else if /i "%dUnit%"=="MB" (
+    set /a totalMB=!dSize!
+) else (
+    echo Unknown unit "%dUnit%". Assuming MB.
+    set /a totalMB=!dSize!
+)
+
+echo Detected Disk Size: !totalMB! MB
+
+:: --- BƯỚC 3: Tính toán chia đôi ---
+:: Công thức: (Tổng MB - 512 MB EFI) / 2
+set /a partSize=(!totalMB!-512)/2
+
+if !partSize! lss 10000 (
+    echo Error: Calculated partition size is too small (!partSize! MB).
+    pause
+    goto :Error
+)
+
+echo Windows Partition Target: !partSize! MB
+
+:: --- BƯỚC 4: Thực thi Diskpart ---
 (
     echo select disk %disknum%
     echo clean
     echo convert gpt
+    
+    REM Tạo phân vùng EFI
     echo create partition efi size=512
     echo format quick fs=fat32 label="System"
     echo assign letter="S"
-    echo create partition primary size=%windowsSizeMB%
+    
+    REM Tạo phân vùng Windows (Size tính bằng MB ở trên)
+    echo create partition primary size=!partSize!
     echo format quick fs=ntfs label="Windows"
     echo assign letter="W"
+    
+    REM Tạo phân vùng Data (Phần còn lại)
     echo create partition primary
     echo format quick fs=ntfs label="Data"
     echo assign letter="D"
+    
     echo exit
 ) | diskpart
 
@@ -114,50 +145,6 @@ bcdboot W:\Windows /s S: /f UEFI
 echo Installation complete. You can now reboot into Windows.
 pause
 exit
-@REM :Option2
-@REM ( setlocal EnableDelayedExpansion
-@REM     echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
 
-@REM     rem Get disk size in bytes using WMIC (available in WinPE/Windows Setup)
-@REM     for /f "tokens=2 delims==" %%s in ('wmic diskdrive where "index=%disknum%" get size /value ^| find "="') do set "diskSizeBytes=%%s"
-@REM     if not defined diskSizeBytes (
-@REM         echo Could not determine disk size. Exiting...
-@REM         exit /b 1
-@REM     )
-
-@REM     rem Convert to MB and split the free space (subtract 512 MB for EFI)
-@REM     set /a diskSizeMB=diskSizeBytes/1024/1024
-@REM     set /a windowsSizeMB=(diskSizeMB-512)/2
-@REM     if %windowsSizeMB% lss 20480 (
-@REM         echo Calculated Windows partition too small (%windowsSizeMB% MB). Exiting...
-@REM         exit /b 1
-@REM     )
-
-@REM     (
-@REM         echo select disk %disknum%
-@REM         echo clean
-@REM         echo convert gpt
-@REM         echo create partition efi size=512
-@REM         echo format quick fs=fat32 label="System"
-@REM         echo assign letter="S"
-@REM         echo create partition primary size=!windowsSizeMB!
-@REM         echo format quick fs=ntfs label="Windows"
-@REM         echo assign letter="W"
-@REM         echo create partition primary
-@REM         echo format quick fs=ntfs label="Data"
-@REM         echo assign letter="D"
-@REM         echo exit
-@REM     ) | diskpart
-
-@REM     echo Applying Windows image to disk %disknum%...
-@REM     dism /Apply-Image /ImageFile:%InstallFile% /Index:1 /ApplyDir:W:\
-    
-@REM     echo Configuring boot files...
-@REM     bcdboot W:\Windows /s S: /f UEFI
-
-@REM     echo Installation complete. You can now reboot into Windows.
-@REM     pause
-@REM     exit
-@REM  )
 :Error
 echo Invalid input. Exiting...
