@@ -62,49 +62,102 @@ goto :Error
     exit
 )
 :Option2
-( setlocal EnableDelayedExpansion
-    echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
+setlocal EnableDelayedExpansion
+echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
 
-    rem Get disk size in bytes using WMIC (available in WinPE/Windows Setup)
-    for /f "tokens=2 delims==" %%s in ('wmic diskdrive where "index=%disknum%" get size /value ^| find "="') do set "diskSizeBytes=%%s"
-    if not defined diskSizeBytes (
-        echo Could not determine disk size. Exiting...
-        exit /b 1
-    )
+REM --- FIX: Dùng PowerShell để lấy dung lượng MB vì CMD không tính được số Bytes quá lớn ---
+set "diskSizeMB="
+for /f "usebackq" %%A in (`powershell -command "[math]::Round((Get-Disk -Number %disknum%).Size / 1MB)"`) do set "diskSizeMB=%%A"
 
-    rem Convert to MB and split the free space (subtract 512 MB for EFI)
-    set /a diskSizeMB=diskSizeBytes/1024/1024
-    set /a windowsSizeMB=(diskSizeMB-512)/2
-    if %windowsSizeMB% lss 20480 (
-        echo Calculated Windows partition too small (%windowsSizeMB% MB). Exiting...
-        exit /b 1
-    )
-
-    (
-        echo select disk %disknum%
-        echo clean
-        echo convert gpt
-        echo create partition efi size=512
-        echo format quick fs=fat32 label="System"
-        echo assign letter="S"
-        echo create partition primary size=!windowsSizeMB!
-        echo format quick fs=ntfs label="Windows"
-        echo assign letter="W"
-        echo create partition primary
-        echo format quick fs=ntfs label="Data"
-        echo assign letter="D"
-        echo exit
-    ) | diskpart
-
-    echo Applying Windows image to disk %disknum%...
-    dism /Apply-Image /ImageFile:%InstallFile% /Index:1 /ApplyDir:W:\
-    
-    echo Configuring boot files...
-    bcdboot W:\Windows /s S: /f UEFI
-
-    echo Installation complete. You can now reboot into Windows.
+if "%diskSizeMB%"=="" (
+    echo Error: Could not determine disk size. PowerShell may be missing or disk is invalid.
     pause
-    exit
- )
+    exit /b
+)
+
+REM --- Tính toán chia đôi ổ cứng: (Tổng MB - 512MB EFI) chia 2 ---
+REM Lưu ý: set /a chỉ hoạt động tốt nếu ổ cứng nhỏ hơn 2TB (2 triệu MB).
+set /a windowsSizeMB=(diskSizeMB-512)/2
+
+echo Disk Size: %diskSizeMB% MB
+echo Windows Partition Target: %windowsSizeMB% MB
+
+if %windowsSizeMB% lss 20480 (
+    echo Calculated Windows partition too small (%windowsSizeMB% MB). Exiting...
+    pause
+    exit /b
+)
+
+REM
+(
+    echo select disk %disknum%
+    echo clean
+    echo convert gpt
+    echo create partition efi size=512
+    echo format quick fs=fat32 label="System"
+    echo assign letter="S"
+    echo create partition primary size=%windowsSizeMB%
+    echo format quick fs=ntfs label="Windows"
+    echo assign letter="W"
+    echo create partition primary
+    echo format quick fs=ntfs label="Data"
+    echo assign letter="D"
+    echo exit
+) | diskpart
+
+echo Applying Windows image to disk %disknum%...
+dism /Apply-Image /ImageFile:%InstallFile% /Index:1 /ApplyDir:W:\
+
+echo Configuring boot files...
+bcdboot W:\Windows /s S: /f UEFI
+
+echo Installation complete. You can now reboot into Windows.
+pause
+exit
+@REM :Option2
+@REM ( setlocal EnableDelayedExpansion
+@REM     echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
+
+@REM     rem Get disk size in bytes using WMIC (available in WinPE/Windows Setup)
+@REM     for /f "tokens=2 delims==" %%s in ('wmic diskdrive where "index=%disknum%" get size /value ^| find "="') do set "diskSizeBytes=%%s"
+@REM     if not defined diskSizeBytes (
+@REM         echo Could not determine disk size. Exiting...
+@REM         exit /b 1
+@REM     )
+
+@REM     rem Convert to MB and split the free space (subtract 512 MB for EFI)
+@REM     set /a diskSizeMB=diskSizeBytes/1024/1024
+@REM     set /a windowsSizeMB=(diskSizeMB-512)/2
+@REM     if %windowsSizeMB% lss 20480 (
+@REM         echo Calculated Windows partition too small (%windowsSizeMB% MB). Exiting...
+@REM         exit /b 1
+@REM     )
+
+@REM     (
+@REM         echo select disk %disknum%
+@REM         echo clean
+@REM         echo convert gpt
+@REM         echo create partition efi size=512
+@REM         echo format quick fs=fat32 label="System"
+@REM         echo assign letter="S"
+@REM         echo create partition primary size=!windowsSizeMB!
+@REM         echo format quick fs=ntfs label="Windows"
+@REM         echo assign letter="W"
+@REM         echo create partition primary
+@REM         echo format quick fs=ntfs label="Data"
+@REM         echo assign letter="D"
+@REM         echo exit
+@REM     ) | diskpart
+
+@REM     echo Applying Windows image to disk %disknum%...
+@REM     dism /Apply-Image /ImageFile:%InstallFile% /Index:1 /ApplyDir:W:\
+    
+@REM     echo Configuring boot files...
+@REM     bcdboot W:\Windows /s S: /f UEFI
+
+@REM     echo Installation complete. You can now reboot into Windows.
+@REM     pause
+@REM     exit
+@REM  )
 :Error
 echo Invalid input. Exiting...
