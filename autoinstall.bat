@@ -66,14 +66,11 @@ setlocal EnableDelayedExpansion
 echo Cleaning and partitioning disk %disknum% for Windows (50%%) and Data (50%%)...
 
 :: --- BƯỚC 1: Lấy dung lượng ổ cứng từ Diskpart ---
-:: Logic: Chạy 'list disk', tìm dòng chứa Disk đang chọn, lấy cột dung lượng và đơn vị.
-:: Mặc định output: "Disk 0    Online          476 GB      0 B"
-:: Token 1=Disk, 2=Index, 3=Status(Online), 4=Size, 5=Unit(GB/MB)
-
 set "dSize="
 set "dUnit="
 set "totalMB=0"
 
+:: Lấy thông tin Size và Unit (GB/MB)
 for /f "tokens=4,5" %%a in ('echo list disk ^| diskpart ^| find "Disk %disknum%"') do (
     set "dSize=%%a"
     set "dUnit=%%b"
@@ -81,31 +78,32 @@ for /f "tokens=4,5" %%a in ('echo list disk ^| diskpart ^| find "Disk %disknum%"
 
 :: Kiểm tra nếu không lấy được thông tin
 if "%dSize%"=="" (
-    echo Error: Could not detect disk size from Diskpart.
+    echo Error: Could not detect disk size.
     pause
     goto :Error
 )
 
+:: --- QUAN TRỌNG: Lọc bỏ dấu chấm (.) và dấu phẩy (,) ---
+:: Điều này giúp tránh lỗi ". was unexpected" nếu số có dạng 40.5 hoặc 1.000
+set "dSize=!dSize:.=!"
+set "dSize=!dSize:,=!"
+
 :: --- BƯỚC 2: Quy đổi ra MB ---
-:: Lưu ý: CMD chỉ tính toán được số nguyên dưới 2TB (khoảng 2.000.000 MB).
-:: Nếu ổ cứng của bạn > 2TB, lệnh set /a sẽ bị lỗi.
 if /i "%dUnit%"=="GB" (
     set /a totalMB=!dSize!*1024
-) else if /i "%dUnit%"=="MB" (
-    set /a totalMB=!dSize!
 ) else (
-    echo Unknown unit "%dUnit%". Assuming MB.
     set /a totalMB=!dSize!
 )
 
-echo Detected Disk Size: !totalMB! MB
+echo Detected Disk Size (Integer): !totalMB! MB
 
 :: --- BƯỚC 3: Tính toán chia đôi ---
 :: Công thức: (Tổng MB - 512 MB EFI) / 2
 set /a partSize=(!totalMB!-512)/2
 
+:: Kiểm tra an toàn: Nếu tính ra nhỏ hơn 10GB thì báo lỗi
 if !partSize! lss 10000 (
-    echo Error: Calculated partition size is too small (!partSize! MB).
+    echo Error: Partition size too small (!partSize! MB). Check disk size.
     pause
     goto :Error
 )
@@ -118,12 +116,12 @@ echo Windows Partition Target: !partSize! MB
     echo clean
     echo convert gpt
     
-    REM Tạo phân vùng EFI
+    REM Tạo phân vùng EFI 512MB
     echo create partition efi size=512
     echo format quick fs=fat32 label="System"
     echo assign letter="S"
     
-    REM Tạo phân vùng Windows (Size tính bằng MB ở trên)
+    REM Tạo phân vùng Windows (Size đã tính ở trên)
     echo create partition primary size=!partSize!
     echo format quick fs=ntfs label="Windows"
     echo assign letter="W"
