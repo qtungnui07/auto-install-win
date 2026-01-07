@@ -59,6 +59,7 @@ goto :Error
 
     echo Installation complete. You can now reboot into Windows.
     pause
+    wpeutil reboot
     exit
 )
 :Option2
@@ -93,6 +94,7 @@ bcdboot W:\Windows /s S: /f UEFI
 
 echo Installation complete. You can now reboot into Windows.
 pause
+wpeutil reboot
 exit
 
 :Error
